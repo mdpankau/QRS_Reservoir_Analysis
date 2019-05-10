@@ -1,0 +1,753 @@
+---
+title: "043019_Loop_FINAL_FASTA"
+author: "Mark Pankau"
+date: "April 30, 2019"
+output: html_document
+---
+
+
+
+
+
+```{r}
+setwd("~/NGS_Analysis/QRS_Reservoir_Paper_Illumina_Only_2019/050519 FINAL_FASTA_by SI")
+path <- "~/NGS_Analysis/QRS_Reservoir_Paper_Illumina_Only_2019/050519 FINAL_FASTA_by SI" 
+QRSID <- c("QB045",
+                 "QB726",
+                 "QC885",
+                 "QD022",
+                 "QF564",
+                 "QG262")
+#QRSID <- "QB045"
+for(patient in QRSID){
+#READ IN THE FASTA file
+  fasta <- readDNAStringSet(paste(patient,"Env_Final.fasta", sep = "_"))
+  msa <- msa(fasta)
+  summary(msa)
+  #msaConvert(msa,type = "phangorn::phyDat")
+  #fasta_msa <- msaConvert(msa, type = "bio3d::fasta")
+  #ape_msa <- msaConvert(msa, type = "ape::DNAbin")
+phangorn_msa <- as.phyDat(msa, type = "DNA")
+  #summary(phangorn_msa)
+  #summary(ape_msa)
+ 
+    
+      Sequencenames <- names(phangorn_msa)
+df <- as.data.frame(str_split_fixed(Sequencenames, "_", 7))
+df <- cbind(Sequencenames,df)
+names(df) <- c("Sequencenames",
+               "Unique ID",
+               "Patient",
+               "Region",
+               "Years_Post_Infection",
+               "Nucleic_Acid",
+               "Read_Count",
+               "IIorSI")
+
+df$Years_Post_Infection = as.numeric(as.character(df$Years_Post_Infection))
+df$Read_Count = as.numeric(as.character(df$Read_Count))
+df$Nucleic_Acid <- as.character(df$Nucleic_Acid)
+
+n_occur <- data.frame(table(Sequencenames))
+n_occur[n_occur$Freq > 1,]
+##need to find min AIC for model test and use that model in computing pairwise distance.  
+model <- modelTest(phangorn_msa, model = "all")
+minmodel <- model$Model[which.min(model$AIC)]
+minmodel
+
+gsub( "\\+.*$", "", minmodel)
+
+
+distancemethod <- dist.ml(phangorn_msa, model = "JC69")  ##Computes pairwise distances
+treeNJ <- NJ(distancemethod)
+treeNJ <- root(treeNJ, paste(na.omit(df$Sequencenames[df$Years_Post_Infection == min(df$Years_Post_Infection, na.rm = TRUE) &
+                          df$Read_Count == max(df$Read_Count[df$Years_Post_Infection == min(df$Years_Post_Infection, na.rm = TRUE)], na.rm = TRUE)])),resolve.root = TRUE)
+
+
+
+DNAfit <- pml(treeNJ, phangorn_msa)
+DNAJC <- optim.pml(DNAfit, model = paste(gsub( "\\+.*$", "", minmodel)))
+bs <- bootstrap.pml(DNAJC, bs = 100, trees = TRUE, multicore = TRUE,
+  mc.cores = 4)
+treeBS <- plotBS(DNAJC$tree ,bs)
+
+treeBS <- root(treeBS, paste(na.omit(df$Sequencenames[df$Years_Post_Infection == min(df$Years_Post_Infection, na.rm = TRUE) &
+                          df$Read_Count == max(df$Read_Count[df$Years_Post_Infection == min(df$Years_Post_Infection, na.rm = TRUE)], na.rm = TRUE)])),resolve.root = TRUE)
+
+plot(treeBS)
+
+p = ggtree(treeBS, layout = 'rectangular')
+
+
+pdf(file = paste(patient, "delete_Chimera_Env", "Tree", ".pdf", sep = "_"))
+
+q <- p %<+% df + geom_tippoint(aes(shape = Nucleic_Acid,
+                               color = IIorSI),
+                           size = 3) +
+  theme(legend.position = "left") +
+  ggtitle(paste(df$Patient, df$Region, sep = "_")) 
+
+#+  scale_color_gradientn(breaks = unique(df$Years_Post_Infection),
+#                     labels = unique(df$Years_Post_Infection),
+#                     colors = c("#e6194B", "#f58231", "#ffe119", 
+#                                 "#bfef45", "#3cb44b", "#42d4f4",
+#                                "#4363d8", "#911eb4", "#f032e6")) 
+  print(q)
+  dev.off()
+
+
+
+
+ 
+  Treed  = as.phylo(q)
+df$Read_Count = as.numeric(df$Read_Count)
+df1 <- ddply(df,.(df$Patient,df$Years_Post_Infection),
+             transform,
+             Proportion=Read_Count/sum(Read_Count))
+
+
+#df8$Root_to_tip = distRoot(Treed, tips = "all", method = "patristic")
+Root_to_tip = distRoot(Treed)
+Root_to_tip = as.data.frame(Root_to_tip)
+df2 = cbind(as.data.frame(rownames(Root_to_tip)), Root_to_tip)
+names(df2) = c("Sequencenames",
+               "Root_to_tip")
+df3 = merge(df1, df2, by = "Sequencenames")
+#df11$IIorSI <- ifelse(df11$Root_to_tip > 0.181, "Superinfection", "Initial Infection")
+
+
+
+ggplot() + geom_jitter(data = df3,
+                       aes(x = df3$Years_Post_Infection,
+                           y = df3$Root_to_tip,
+                           shape = Nucleic_Acid,
+                           size = Proportion,
+                           color = IIorSI)) + 
+  xlab("Days Post Infection") +
+  ylab("Root to Tip Distance") +
+  ggtitle(paste(df3$Patient, df3$Region, sep = " ")) + scale_color_manual(values = c("#0000ff",
+                                                       "#ff0000"))  
+
+
+
+
+assign(paste(patient, "df4", sep = "_"), NULL)
+
+assign(paste(patient, "df4", sep = "_"), na.omit(df3 %>%
+   group_by(Years_Post_Infection, IIorSI, Nucleic_Acid) %>%
+   summarize(Proportion_Each = sum(Proportion))))
+
+prop = assign(paste(patient, "df4", sep = "_"), na.omit(df3 %>%
+   group_by(Years_Post_Infection, IIorSI, Nucleic_Acid, .drop = FALSE) %>%
+   summarize(Proportion_Each = sum(Proportion))))
+
+
+#issue - i don't get the 0 values when a variant isn't seen
+#can i create a new row with zeros based off the proportion sum at each time point?
+#for each timepoint i need II SI and Recombinant values, if no value supplied create a row with 0
+prop$IIorSI <- as.character(prop$IIorSI)
+prop$IIorSI <- ifelse(prop$IIorSI %in% c("Super"), "Superinfection", prop$IIorSI)
+prop1 = assign(paste(patient, "df4", sep = "_"), na.omit(df3 %>%
+   group_by(Years_Post_Infection, IIorSI, Nucleic_Acid, .drop = FALSE) %>%
+   summarize(Proportion_Each = sum(Proportion))))
+prop1$IIorSI <- as.character(prop1$IIorSI)
+prop1$IIorSI <- ifelse(prop1$IIorSI %in% c("Super"), "Superinfection", prop1$IIorSI)
+propII <- prop1 
+
+propSI <-  prop1
+
+propR <- prop1
+  
+propII$Proportion_Each <- NULL
+propSI$Proportion_Each <- NULL
+propR$Proportion_Each <- NULL
+propII$IIorSI <- "Initial"
+propSI$IIorSI <- "Superinfection"
+propR$IIorSI <- "Recombinant"
+
+propII <- unique(propII)
+propSI <- unique(propSI)
+propR <- unique(propR)
+class(prop1$Years_Post_Infection)
+propall <- rbind(propII, propSI, propR)
+
+prop1 <- merge(prop1, propall, by = c("Years_Post_Infection",
+                             "Nucleic_Acid",
+                             "IIorSI"), all = TRUE)
+
+prop1$Proportion_Each <- ifelse(prop1$Proportion_Each %in% c(NA), 0, prop1$Proportion_Each)
+
+
+
+
+prop1$IIorSI <- as.character(prop1$IIorSI)
+##dashed line at the largest RNA (time)
+prop <- prop1
+pdf(file = paste(patient, "delete_Chimera_Env", "Proportion", ".pdf", sep = "_"))
+class(prop$IIorSI)
+class(prop$Years_Post_Infection)
+
+H <-  ggplot()  +
+  xlab("Years Post Infection") +
+  ylab("Proportion of each Virus")+
+  geom_line(data=prop[prop$IIorSI == "Superinfection" &
+                        prop$Nucleic_Acid %in% "RNA",], 
+               aes(x= Years_Post_Infection,
+                   y= Proportion_Each), color = "red") +
+  geom_line(data=prop[prop$IIorSI  == "Initial" &
+                        prop$Nucleic_Acid == "RNA",], 
+               aes(x= Years_Post_Infection ,
+                   y= Proportion_Each), color = "blue") +
+  geom_point(data=prop[prop$IIorSI == "Superinfection" &
+                        prop$Nucleic_Acid == "RNA",], 
+               aes(x= Years_Post_Infection,
+                   y= Proportion_Each), color = "red") +
+  geom_point(data=prop[prop$IIorSI  == "Initial" &
+                        prop$Nucleic_Acid == "RNA",], 
+               aes(x= Years_Post_Infection ,
+                   y= Proportion_Each), color = "blue") +
+   geom_line(data=prop[prop$IIorSI  == "Recombinant" &
+                        prop$Nucleic_Acid == "RNA",], 
+               aes(x= Years_Post_Infection ,
+                   y= Proportion_Each), color = "green") +
+  geom_point(data=prop[prop$IIorSI == "Recombinant" &
+                        prop$Nucleic_Acid == "RNA",], 
+               aes(x= Years_Post_Infection,
+                   y= Proportion_Each), color = "green")
+     
+ print(H)
+assign(paste(patient, "proportion_Env_plot", sep = "_"), H)
+
+dev.off()
+ pairwise_distance <- cophenetic.phylo(treeBS)
+pairwise_distance <- as.data.frame(pairwise_distance)
+
+
+DNA_pairwise <- pairwise_distance[,grep("DNA",names(pairwise_distance)),]
+
+
+#Return only RNA values in the row names
+DNA_pairwise <- DNA_pairwise[grep("DNA",names(pairwise_distance), invert = TRUE),]
+
+
+
+
+##At this point I have a matrix with DNA sequence names as the columns-
+##RNA sequence names as the rows
+## I want to match the DNA to the RNA that has the smallest pairwise distance-
+## and the smallest days post infection.  Right now, the code matches-
+##smallest pairwise distance and alphabetical order of sequence names.
+## I can't rename all the sequences by their DPI because they need unique names-
+## DPI + sequence counts may get me there, However, the way numbers as strings-
+## are processed may be a problem as it will put 11 as earlier than 2.  I can -
+##make a key where the days are letters of the alphabet, and convert those-
+##letters back to numbers after matching smallest PWD. BUT the rownames can't
+## be identical. So I will have to make each time point a letter followed by
+## a sequential number.
+
+
+
+assign(paste(patient, "distance_matrix", sep = ""), DNA_pairwise)
+
+
+
+DNA_pairwise1 = as.data.frame(colnames(DNA_pairwise))
+
+
+
+
+DNA_pairwise1 <- cbind(DNA_pairwise1,rownames(DNA_pairwise[apply(DNA_pairwise, 2, which.min), ]))
+names(DNA_pairwise1) <- c("Sequencenames", "Closest RNA")
+x <- str_split_fixed(DNA_pairwise1$`Closest RNA`, "_", 7)
+DNA_pairwise1$Timepoint <- x[,4]
+DNA_pairwise1$Timepoint <- as.numeric(DNA_pairwise1$Timepoint)
+  
+
+
+
+
+
+DNAEnv <- DNA_pairwise1
+#DNAEnv$Nucleic_Acid <- "Env"
+
+Env  <- ggplot()  +
+ xlab("DNA") +
+  ylab("Years Post Infection")+
+  geom_boxplot(data=DNAEnv,
+              aes(x= NucleicAcid ,
+                  y= Timepoint ))+ 
+  geom_jitter(data=DNAEnv, 
+             aes(x= NucleicAcid ,
+                 y= Timepoint))
+Env
+
+
+#combine df11 (proportions) with DNA2 (closest RNA) only want the DNA
+#df11 is df1 now
+
+#dfDNA <- na.omit(df[df$Years_Post_Infection == paste (max(df$Years_Post_Infection, na.rm = TRUE)),])
+
+Timepointprop <- merge(DNAEnv, df1, by = c("Sequencenames"))
+
+  
+  
+Timepointprop$YearstoART <- max(df$Years_Post_Infection[df$Nucleic_Acid == "RNA"])
+
+Timepointprop$Years_Prior_to_ART <- Timepointprop$YearstoART - Timepointprop$Timepoint
+#####################################################################################################################################################################################################################################################################################################################
+class(Timepointprop$Proportion)
+
+Timeisaflatcircle <- as.data.frame(ddply(Timepointprop, ~Years_Prior_to_ART + Patient ,summarise, count=sum(Proportion)))
+
+
+
+
+write.csv(Timeisaflatcircle, file = paste(patient, "Env_Timepoint_Prop.csv", sep = "_"))
+
+
+
+
+pdf(file = paste(patient, "delete_Chimera_Env", "DNA_Seeding", ".pdf", sep = "_"))
+
+Seed_Plot <- ggplot() + geom_bar(data = Timepointprop,
+                    aes(x = Timepointprop$Years_Prior_to_ART*-1,
+                        y = Proportion,
+                        color = IIorSI,
+                        fill = IIorSI), stat = "identity") + xlab("Years Prior to cART") +
+  ylab("Proportion of HIV DNA \n reservoir sequences seeded") + 
+  scale_fill_manual(values = c("Initial"= "blue",
+                               "Recombinant" = "green",
+                               "Superinfection" = "red"))+
+  scale_color_manual(values = c("Initial"= "blue",
+                               "Recombinant" = "green",
+                               "Superinfection" = "red"))
+print(Seed_Plot)
+dev.off()
+
+}
+ 
+```
+
+
+```{r}
+setwd("~/NGS_Analysis/QRS_Reservoir_Paper_Illumina_Only_2019/050519 FINAL_FASTA_by SI")
+path <- "~/NGS_Analysis/QRS_Reservoir_Paper_Illumina_Only_2019/050519 FINAL_FASTA_by SI" 
+QRSID <- c("QB045",
+                 "QB726",
+                 "QC885",
+                 "QD022",
+                 "QF564",
+                 "QG262")
+#QRSID <- "QB045"
+for(patient in QRSID){
+#READ IN THE FASTA file
+  fasta <- readDNAStringSet(paste(patient,"Gag_Final.fasta", sep = "_"))
+  msa <- msa(fasta)
+  summary(msa)
+  #msaConvert(msa,type = "phangorn::phyDat")
+  #fasta_msa <- msaConvert(msa, type = "bio3d::fasta")
+  #ape_msa <- msaConvert(msa, type = "ape::DNAbin")
+phangorn_msa <- as.phyDat(msa, type = "DNA")
+  #summary(phangorn_msa)
+  #summary(ape_msa)
+ 
+    
+      Sequencenames <- names(phangorn_msa)
+df <- as.data.frame(str_split_fixed(Sequencenames, "_", 7))
+df <- cbind(Sequencenames,df)
+names(df) <- c("Sequencenames",
+               "Unique ID",
+               "Patient",
+               "Region",
+               "Years_Post_Infection",
+               "Nucleic_Acid",
+               "Read_Count",
+               "IIorSI")
+
+df$Years_Post_Infection = as.numeric(as.character(df$Years_Post_Infection))
+df$Read_Count = as.numeric(as.character(df$Read_Count))
+df$Nucleic_Acid <- as.character(df$Nucleic_Acid)
+
+n_occur <- data.frame(table(Sequencenames))
+n_occur[n_occur$Freq > 1,]
+##need to find min AIC for model test and use that model in computing pairwise distance.  
+model <- modelTest(phangorn_msa, model = "all")
+minmodel <- model$Model[which.min(model$AIC)]
+minmodel
+
+gsub( "\\+.*$", "", minmodel)
+
+
+distancemethod <- dist.ml(phangorn_msa, model = "JC69")  ##Computes pairwise distances
+treeNJ <- NJ(distancemethod)
+treeNJ <- root(treeNJ, paste(na.omit(df$Sequencenames[df$Years_Post_Infection == min(df$Years_Post_Infection, na.rm = TRUE) &
+                          df$Read_Count == max(df$Read_Count[df$Years_Post_Infection == min(df$Years_Post_Infection, na.rm = TRUE)], na.rm = TRUE)])),resolve.root = TRUE)
+
+
+
+DNAfit <- pml(treeNJ, phangorn_msa)
+DNAJC <- optim.pml(DNAfit, model = paste(gsub( "\\+.*$", "", minmodel)))
+bs <- bootstrap.pml(DNAJC, bs = 100, trees = TRUE, multicore = TRUE,
+  mc.cores = 4)
+treeBS <- plotBS(DNAJC$tree ,bs)
+
+treeBS <- root(treeBS, paste(na.omit(df$Sequencenames[df$Years_Post_Infection == min(df$Years_Post_Infection, na.rm = TRUE) &
+                          df$Read_Count == max(df$Read_Count[df$Years_Post_Infection == min(df$Years_Post_Infection, na.rm = TRUE)], na.rm = TRUE)])),resolve.root = TRUE)
+
+plot(treeBS)
+
+p = ggtree(treeBS, layout = 'rectangular')
+
+
+pdf(file = paste(patient, "delete_Chimera_Gag", "Tree", ".pdf", sep = "_"))
+
+q <- p %<+% df + geom_tippoint(aes(shape = Nucleic_Acid,
+                               color = IIorSI),
+                           size = 3) +
+  theme(legend.position = "left") +
+  ggtitle(paste(df$Patient, df$Region, sep = "_")) 
+
+#+  scale_color_gradientn(breaks = unique(df$Years_Post_Infection),
+#                     labels = unique(df$Years_Post_Infection),
+#                     colors = c("#e6194B", "#f58231", "#ffe119", 
+#                                 "#bfef45", "#3cb44b", "#42d4f4",
+#                                "#4363d8", "#911eb4", "#f032e6")) 
+  print(q)
+  dev.off()
+
+
+
+
+ 
+  Treed  = as.phylo(q)
+df$Read_Count = as.numeric(df$Read_Count)
+df1 <- ddply(df,.(df$Patient,df$Years_Post_Infection),
+             transform,
+             Proportion=Read_Count/sum(Read_Count))
+
+
+#df8$Root_to_tip = distRoot(Treed, tips = "all", method = "patristic")
+Root_to_tip = distRoot(Treed)
+Root_to_tip = as.data.frame(Root_to_tip)
+df2 = cbind(as.data.frame(rownames(Root_to_tip)), Root_to_tip)
+names(df2) = c("Sequencenames",
+               "Root_to_tip")
+df3 = merge(df1, df2, by = "Sequencenames")
+#df11$IIorSI <- ifelse(df11$Root_to_tip > 0.181, "Superinfection", "Initial Infection")
+
+
+
+ggplot() + geom_jitter(data = df3,
+                       aes(x = df3$Years_Post_Infection,
+                           y = df3$Root_to_tip,
+                           shape = Nucleic_Acid,
+                           size = Proportion,
+                           color = IIorSI)) + 
+  xlab("Days Post Infection") +
+  ylab("Root to Tip Distance") +
+  ggtitle(paste(df3$Patient, df3$Region, sep = " ")) + scale_color_manual(values = c("#0000ff",
+                                                       "#ff0000"))  
+
+
+
+
+assign(paste(patient, "df4", sep = "_"), NULL)
+
+assign(paste(patient, "df4", sep = "_"), na.omit(df3 %>%
+   group_by(Years_Post_Infection, IIorSI, Nucleic_Acid) %>%
+   summarize(Proportion_Each = sum(Proportion))))
+
+prop = assign(paste(patient, "df4", sep = "_"), na.omit(df3 %>%
+   group_by(Years_Post_Infection, IIorSI, Nucleic_Acid, .drop = FALSE) %>%
+   summarize(Proportion_Each = sum(Proportion))))
+
+
+#issue - i don't get the 0 values when a variant isn't seen
+#can i create a new row with zeros based off the proportion sum at each time point?
+#for each timepoint i need II SI and Recombinant values, if no value supplied create a row with 0
+prop$IIorSI <- as.character(prop$IIorSI)
+prop$IIorSI <- ifelse(prop$IIorSI %in% c("Super"), "Superinfection", prop$IIorSI)
+prop1 = assign(paste(patient, "df4", sep = "_"), na.omit(df3 %>%
+   group_by(Years_Post_Infection, IIorSI, Nucleic_Acid, .drop = FALSE) %>%
+   summarize(Proportion_Each = sum(Proportion))))
+prop1$IIorSI <- as.character(prop1$IIorSI)
+prop1$IIorSI <- ifelse(prop1$IIorSI %in% c("Super"), "Superinfection", prop1$IIorSI)
+propII <- prop1 
+
+propSI <-  prop1
+
+propR <- prop1
+  
+propII$Proportion_Each <- NULL
+propSI$Proportion_Each <- NULL
+propR$Proportion_Each <- NULL
+propII$IIorSI <- "Initial"
+propSI$IIorSI <- "Superinfection"
+propR$IIorSI <- "Recombinant"
+
+propII <- unique(propII)
+propSI <- unique(propSI)
+propR <- unique(propR)
+class(prop1$Years_Post_Infection)
+propall <- rbind(propII, propSI, propR)
+
+prop1 <- merge(prop1, propall, by = c("Years_Post_Infection",
+                             "Nucleic_Acid",
+                             "IIorSI"), all = TRUE)
+
+prop1$Proportion_Each <- ifelse(prop1$Proportion_Each %in% c(NA), 0, prop1$Proportion_Each)
+
+
+
+
+prop1$IIorSI <- as.character(prop1$IIorSI)
+##dashed line at the largest RNA (time)
+prop <- prop1
+pdf(file = paste(patient, "delete_Chimera_Gag", "Proportion", ".pdf", sep = "_"))
+class(prop$IIorSI)
+class(prop$Years_Post_Infection)
+
+H <-  ggplot()  +
+  xlab("Years Post Infection") +
+  ylab("Proportion of each Virus")+
+  geom_line(data=prop[prop$IIorSI == "Superinfection" &
+                        prop$Nucleic_Acid %in% "RNA",], 
+               aes(x= Years_Post_Infection,
+                   y= Proportion_Each), color = "red") +
+  geom_line(data=prop[prop$IIorSI  == "Initial" &
+                        prop$Nucleic_Acid == "RNA",], 
+               aes(x= Years_Post_Infection ,
+                   y= Proportion_Each), color = "blue") +
+  geom_point(data=prop[prop$IIorSI == "Superinfection" &
+                        prop$Nucleic_Acid == "RNA",], 
+               aes(x= Years_Post_Infection,
+                   y= Proportion_Each), color = "red") +
+  geom_point(data=prop[prop$IIorSI  == "Initial" &
+                        prop$Nucleic_Acid == "RNA",], 
+               aes(x= Years_Post_Infection ,
+                   y= Proportion_Each), color = "blue") +
+   geom_line(data=prop[prop$IIorSI  == "Recombinant" &
+                        prop$Nucleic_Acid == "RNA",], 
+               aes(x= Years_Post_Infection ,
+                   y= Proportion_Each), color = "green") +
+  geom_point(data=prop[prop$IIorSI == "Recombinant" &
+                        prop$Nucleic_Acid == "RNA",], 
+               aes(x= Years_Post_Infection,
+                   y= Proportion_Each), color = "green")
+     
+ print(H)
+ assign(paste(patient, "proportion_Gag_plot", sep = "_"), H)
+
+dev.off()
+ pairwise_distance <- cophenetic.phylo(treeBS)
+pairwise_distance <- as.data.frame(pairwise_distance)
+
+
+DNA_pairwise <- pairwise_distance[,grep("DNA",names(pairwise_distance)),]
+
+
+#Return only RNA values in the row names
+DNA_pairwise <- DNA_pairwise[grep("DNA",names(pairwise_distance), invert = TRUE),]
+
+
+
+
+##At this point I have a matrix with DNA sequence names as the columns-
+##RNA sequence names as the rows
+## I want to match the DNA to the RNA that has the smallest pairwise distance-
+## and the smallest days post infection.  Right now, the code matches-
+##smallest pairwise distance and alphabetical order of sequence names.
+## I can't rename all the sequences by their DPI because they need unique names-
+## DPI + sequence counts may get me there, However, the way numbers as strings-
+## are processed may be a problem as it will put 11 as earlier than 2.  I can -
+##make a key where the days are letters of the alphabet, and convert those-
+##letters back to numbers after matching smallest PWD. BUT the rownames can't
+## be identical. So I will have to make each time point a letter followed by
+## a sequential number.
+
+
+
+assign(paste(patient, "distance_matrix", sep = ""), DNA_pairwise)
+
+
+
+DNA_pairwise1 = as.data.frame(colnames(DNA_pairwise))
+
+
+
+
+DNA_pairwise1 <- cbind(DNA_pairwise1,rownames(DNA_pairwise[apply(DNA_pairwise, 2, which.min), ]))
+names(DNA_pairwise1) <- c("Sequencenames", "Closest RNA")
+x <- str_split_fixed(DNA_pairwise1$`Closest RNA`, "_", 7)
+DNA_pairwise1$Timepoint <- x[,4]
+DNA_pairwise1$Timepoint <- as.numeric(DNA_pairwise1$Timepoint)
+  
+
+
+
+
+
+DNAGag <- DNA_pairwise1
+#DNAGag$Nucleic_Acid <- "Gag"
+
+Gag  <- ggplot()  +
+ xlab("DNA") +
+  ylab("Years Post Infection")+
+  geom_boxplot(data=DNAGag,
+              aes(x= NucleicAcid ,
+                  y= Timepoint ))+ 
+  geom_jitter(data=DNAGag, 
+             aes(x= NucleicAcid ,
+                 y= Timepoint))
+Gag
+
+
+#combine df11 (proportions) with DNA2 (closest RNA) only want the DNA
+#df11 is df1 now
+
+#dfDNA <- na.omit(df[df$Years_Post_Infection == paste (max(df$Years_Post_Infection, na.rm = TRUE)),])
+
+Timepointprop <- merge(DNAGag, df1, by = c("Sequencenames"))
+
+  
+  
+Timepointprop$YearstoART <- max(df$Years_Post_Infection[df$Nucleic_Acid == "RNA"])
+
+Timepointprop$Years_Prior_to_ART <- Timepointprop$YearstoART - Timepointprop$Timepoint
+#####################################################################################################################################################################################################################################################################################################################
+class(Timepointprop$Proportion)
+
+Timeisaflatcircle <- as.data.frame(ddply(Timepointprop, ~Years_Prior_to_ART + Patient ,summarise, count=sum(Proportion)))
+
+
+
+
+write.csv(Timeisaflatcircle, file = paste(patient, "Gag_Timepoint_Prop.csv", sep = "_"))
+
+
+
+
+pdf(file = paste(patient, "delete_Chimera_Gag", "DNA_Seeding", ".pdf", sep = "_"))
+Seed_Plot <- ggplot() + geom_bar(data = Timepointprop,
+                    aes(x = Timepointprop$Years_Prior_to_ART*-1,
+                        y = Proportion,
+                        color = IIorSI,
+                        fill = IIorSI), stat = "identity") + xlab("Years Prior to cART") +
+  ylab("Proportion of HIV DNA \n reservoir sequences seeded") + 
+ scale_fill_manual(values = c("Initial"= "blue",
+                               "Recombinant" = "green",
+                               "Superinfection" = "red"))+
+  scale_color_manual(values = c("Initial"= "blue",
+                               "Recombinant" = "green",
+                               "Superinfection" = "red"))
+print(Seed_Plot)
+dev.off()
+
+}
+ 
+```
+
+
+
+
+
+
+
+
+
+```{r}
+setwd("~/NGS_Analysis/QRS_Reservoir_Paper_Illumina_Only_2019/043019_FINAL_FASTA")
+path <- "~/NGS_Analysis/QRS_Reservoir_Paper_Illumina_Only_2019/043019_FINAL_FASTA" 
+
+list.files(path)
+QRSID <- c("QB045",
+                 "QB726",
+                 "QC885",
+                 "QD022",
+                 "QF564",
+                 "QG262")
+#patient <- "QF564"
+TotalProp <- NULL
+for(patient in QRSID){
+  TotalProp <- rbind(TotalProp,read.csv(paste(patient, "Env_Timepoint_Prop.csv", sep = "_")))
+  
+}
+
+TotalProp$X <- NULL
+TotalProp$Years_Prior_to_ART <- round(TotalProp$Years_Prior_to_ART)
+pdf(file = "EnvDNASeedingTime.pdf")
+a <- ggplot() + geom_col(data = TotalProp,
+                    aes(x = Years_Prior_to_ART*-1,
+                      y = count/6,
+                      fill = Patient),
+                    position = "stack") + 
+  scale_x_continuous(breaks = c(0:-18),
+                     limits = c(-14,1)) +
+  scale_y_continuous(breaks = c(0, 0.25, 0.5,0.75, 1),
+                     limits = c(0,1)) + 
+  ggtitle(expression(paste("Estimated time of HIV DNA seeding in ", italic("env")))) +
+  xlab("Years prior to ART initiation") +
+  ylab("Proportion of HIV DNA") 
+#ddply(TotalProp, ~Years_Prior_to_ART, summarize, sum(count)/6)
+print(a)
+dev.off()
+DNAPropEnv <- as.data.frame(ddply(TotalProp, ~Years_Prior_to_ART, summarize, sum(count)/6))
+
+DNAPropEnvPat <- as.data.frame(ddply(TotalProp, ~Years_Prior_to_ART + Patient, summarize, sum(count)))
+
+
+
+
+
+
+
+```
+
+
+```{r}
+setwd("~/NGS_Analysis/QRS_Reservoir_Paper_Illumina_Only_2019/043019_FINAL_FASTA")
+path <- "~/NGS_Analysis/QRS_Reservoir_Paper_Illumina_Only_2019/043019_FINAL_FASTA" 
+ 
+list.files(path)
+QRSID <- c("QB045",
+                 "QB726",
+                 "QC885",
+                 "QD022",
+                 "QF564",
+                 "QG262")
+#patient <- "QF564"
+TotalProp <- NULL
+for(patient in QRSID){
+  TotalProp <- rbind(TotalProp,read.csv(paste(patient, "Gag_Timepoint_Prop.csv", sep = "_")))
+  
+}
+
+TotalProp$X <- NULL
+TotalProp$Years_Prior_to_ART <- round(TotalProp$Years_Prior_to_ART)
+pdf(file = "GagDNASeedingTime.pdf")
+a <- ggplot() + geom_col(data = TotalProp,
+                    aes(x = Years_Prior_to_ART*-1,
+                      y = count/6,
+                      fill = Patient),
+                    position = "stack") + 
+  scale_x_continuous(breaks = c(0:-18),
+                     limits = c(-14,1)) +
+  scale_y_continuous(breaks = c(0, 0.25, 0.5,0.75, 1),
+                     limits = c(0,1)) + 
+  ggtitle(expression(paste("Estimated time of HIV DNA seeding in ", italic("Gag")))) +
+  xlab("Years prior to ART initiation") +
+  ylab("Proportion of HIV DNA") 
+#ddply(TotalProp, ~Years_Prior_to_ART, summarize, sum(count)/6)
+print(a)
+dev.off()
+DNAPropGag <- as.data.frame(ddply(TotalProp, ~Years_Prior_to_ART, summarize, sum(count)/6))
+
+DNAPropGagPat <- as.data.frame(ddply(TotalProp, ~Years_Prior_to_ART + Patient, summarize, sum(count)))
+
+
+
+
+
+
+
+```

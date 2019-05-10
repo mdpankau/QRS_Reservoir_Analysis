@@ -1,0 +1,277 @@
+---
+title: "041219_Fastq_Filtering_Loop_Sample_nochim_Env"
+author: "Mark Pankau"
+date: "April 12, 2019"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include = FALSE}
+##Problems- The code doesn't pick ties in PWD well-
+##it will not choose the earliest day for RNA
+##i should change the names of the RNA to the DPI
+##biggest problem is with TShoot
+#setwd("/Volumes/homes/NGS_Analysis/QRS_Reservoir_Paper_Illumina_Only_2019")
+#source("https://bioconductor.org/biocLite.R")
+#biocLite("dada2")
+#biocLite("seqinr")
+#biocLite("ape")
+#biocLite("ggtree")
+#biocLite("phangorn")
+#biocLite("stringr")
+#biocLite("msa")
+#biocLite("cowplot")
+#biocLite("gridExtra")
+library(dada2)
+library(Rcpp)
+library(data.table)
+library(seqinr)
+library(ape)
+library(ggtree)
+library(phangorn)
+library(stringr)
+library(msa)
+library(data.table)
+library(tools)
+library(cowplot)
+library(gridExtra)
+library(ggplot2)
+library(ggtree)
+library(treeio)
+library(plyr)
+###
+###
+###
+###
+###
+######Things I might want to add in- Color to match the type of initial or superinfection
+#symbol to match patient?,
+#normalize number of dots to represent sequence proportion.
+#pdf("/Volumes/homes/NGS_Analysis/RCODE_Test/PairwisePlots041818.pdf")
+
+```
+
+
+```{r, include=FALSE}
+
+Sample <- c("QB045",
+            "QB726",
+            "QC885",
+            "QD022",
+            "QF564",
+            "QG262")
+
+
+for(x in Sample){
+
+setwd(paste("~/NGS_Analysis/QRS_Reservoir_Paper_Illumina_Only_2019/",x, sep =""))
+path <- paste("~/NGS_Analysis/QRS_Reservoir_Paper_Illumina_Only_2019/", x, sep = "") 
+list.files(path)
+
+# Forward and reverse fastq filenames have format: SAMPLENAME_R1_001.fastq and SAMPLENAME_R2_001.fastq
+
+fnFs <- sort(list.files(path, pattern="_R1_001.fastq", full.names = TRUE))
+fnRs <- sort(list.files(path, pattern="_R2_001.fastq", full.names = TRUE))
+# Extract sample names, assuming filenames have format: SAMPLENAME_XXX.fastq
+sample.names <- sapply(strsplit(basename(fnFs), "_"), `[`, 1)
+#plotQualityProfile(fnFs[1:2])
+#plotQualityProfile(fnRs[])
+
+filt_path <- file.path(path, "nochim_filtered_Env") # Place filtered files in filtered/ subdirectory
+filtFs <- file.path(filt_path, paste0(sample.names, "_F_filt.fastq.gz"))
+filtRs <- file.path(filt_path, paste0(sample.names, "_R_filt.fastq.gz"))
+out <- filterAndTrim(fnFs, filtFs, fnRs, filtRs,
+                     rm.phix=TRUE,
+                     compress=TRUE,
+                     multithread=4,
+                     primer.fwd =  "TACATTATTGTGC",  #primer fwd to pull out only sequences of region
+                     matchIDs = TRUE,
+                     maxEE = 0.5,
+                     minLen = 250)
+#I get only pol sequences filtered.  
+# pol fwd primer "AATTGGGCCTGAAAATCCATA"
+# Gag fwd primer "CAGGGAGCTGGAAAGATTYGC"
+# v3 fwd primer "TACATTATTGTGCYCCAGCTGG"
+
+
+
+head(out)
+out
+write.csv(out, file = "nochim_Env_filt.csv")
+
+errF <- learnErrors(filtFs, multithread=4)
+errR <- learnErrors(filtRs, multithread=4)
+plotErrors(errF, nominalQ=TRUE)
+
+derepFs <- derepFastq(filtFs, verbose=TRUE)
+derepRs <- derepFastq(filtRs, verbose=TRUE)
+# Name the derep-class objects by the sample names
+names(derepFs) <- sample.names
+names(derepRs) <- sample.names
+
+
+dadaFs <- dada(derepFs, err=errF, multithread=4, selfConsist = TRUE, pool = TRUE, OMEGA_C = 0,
+               OMEGA_A = 1e-10, USE_QUALS = TRUE)
+dadaRs <- dada(derepRs, err=errR, multithread=4, selfConsist = TRUE, pool = TRUE, OMEGA_C = 0,
+               OMEGA_A = 1e-10, USE_QUALS = TRUE)
+
+dadaFs[[1]]
+dadaRs[[1]]
+
+
+mergers <- mergePairs(dadaFs,
+                      derepFs,
+                      dadaRs,
+                      derepRs,
+                      verbose=TRUE,
+                      justConcatenate = FALSE,
+                      maxMismatch = 5) # DADA2 has trouble pairing reads with less than 20bp of overlap
+
+
+
+
+# Inspect the merger data.frame from the first sample
+head(mergers[[1]])
+seqtab <- makeSequenceTable(mergers)
+dim(seqtab)
+table(nchar(getSequences(seqtab)))
+seqtab.nochim <- removeBimeraDenovo(seqtab, method="consensus", multithread=TRUE, verbose=TRUE)
+dim(seqtab.nochim)
+sum(seqtab.nochim)/sum(seqtab)
+getN <- function(x) sum(getUniques(x))
+track <- cbind(out, sapply(dadaFs, getN), sapply(mergers, getN), rowSums(seqtab), rowSums(seqtab.nochim))
+#track <- cbind(out, sapply(dadaFs, getN), sapply(mergers, getN), rowSums(seqtab))
+# If processing a single sample, remove the sapply calls: e.g. replace sapply(dadaFs, getN) with getN(dadaFs)
+colnames(track) <- c("input", "filtered", "denoised", "merged", "tabled", "nonchim")
+#rownames(track) <- sample.names
+track
+write.csv(track, file = paste(x, "nochim_Env_Filter_Numbers.csv", sep = "_")) 
+
+final_df <- as.data.frame(t(seqtab))
+
+#final_df$seqs = names(final_df)
+View(final_df)
+write.csv(final_df, file = paste(x,"nochim_setable_nonfiltered.csv"))
+sequences = setDT(final_df, keep.rownames = TRUE)[]
+sequences <- as.data.frame(sequences)
+sequences <-  sequences[, colSums(sequences != 0) > 0]
+sequences = setDT(sequences, keep.rownames = FALSE)
+sample.names  <- as.character(colnames(sequences[,2:ncol(sequences)]))
+
+
+#working forloop to pull out sequences for each barcode
+#for(sample in sample.names) {
+#  assign(paste("Env", sample, sep =""), data.frame(cbind(sequences$rn, sequences[, get(sample)])))
+#}
+#working forloop to get each sequence that has sequence count greater than 0.5% of total
+#for(sample in sample.names) {
+#  assign(paste("Env", sample, sep =""), data.frame(cbind(sequences$rn[sequences[, get(sample)] > sequences[, #get(sample)]*0.005],
+#                                                         sequences[, get(sample)][sequences[, get(sample)] > #sequences[, get(sample)]*0.005])))
+#}
+
+#want to add column of names and name each column
+final <- NULL
+for(sample in sample.names) {
+  c <-  assign(paste("Env", sample, sep =""), data.frame(cbind(sequences$rn[sequences[, get(sample)] > sum(sequences[, get(sample)])*0.005],
+                                                         sequences[, get(sample)][sequences[, get(sample)] > sum(sequences[, get(sample)])*0.005], sample)))
+  final <- rbind(final,c)
+}
+
+
+#(sequences$rn[sequences[, get(sample)] > sum(sequences[, get(sample)])*0.005])
+#sum(sequences[, get(sample)])*0.005
+
+
+samplename <- read.csv("SampleList.csv")
+
+names(final) <- c("sequence", "count", "Sample_ID")
+final <- merge(final, samplename, by = "Sample_ID")
+final$unique <- seq.int(1,nrow(final),1)
+
+final$Sequence.Name <- paste(final$unique, final$Sequence.Name, final$count, sep = "_")
+
+
+final <- data.frame(final$sequence,
+                    final$count,
+                    final$Sequence.Name)
+names(final) <- c("sequence", "count", "name")
+write.csv(final, file = paste(x,"nochim_Sequence_Count_Name_Env.csv", sep = "_"))
+
+
+
+ref <- readDNAStringSet("ref.v3.fasta", format = 'fasta')
+ref
+ref1 <- as.data.frame(ref)
+names(ref)
+ref1$count = as.numeric(1)
+ref1$name <- names(ref)
+names(ref1) <- c("sequence", "count", "name")
+
+##I want to create a csv with all the sample names and then bring it in and add sample names to the final df
+
+
+
+#(.*)@.*
+Env <- data.frame(final)
+
+Env$name <- as.character(Env$name)
+Env$count <- as.numeric(as.character(Env$count))
+n_occur <- data.frame(table(Env$sequence))
+n_occur[n_occur$Freq > 1,]
+
+
+##I want to dereplicate sequences that are duplicates at that specific timepoint.  I should remove replicate
+# numbers and have it be the total count with the "unique number_name_timepoint_nucleic acid""
+
+c <- as.data.frame(str_split_fixed(Env$name, "_", 6))
+
+Env$timepoint <- c$V4
+Env$Nucleic_Acid <- c$V5
+
+
+
+
+
+
+
+dereplicated <- as.data.frame(ddply(Env,~sequence + timepoint + Nucleic_Acid ,summarise,count=sum(count)))
+dereplicated$unique <- seq.int(1,nrow(dereplicated),1)
+
+dereplicated$name <- paste(dereplicated$unique,
+                           x,
+                           "Env",
+                           dereplicated$timepoint,
+                           dereplicated$Nucleic_Acid,
+                           dereplicated$count,
+                           sep = "_")
+
+f = as.data.frame(cbind(as.character(dereplicated$sequence),
+                   dereplicated$count,
+                   dereplicated$name))
+names(f) <- c("sequence",
+              "count",
+              "name")
+
+Env <- data.frame(rbind(f,
+                             ref1))
+
+Env$name <- as.character(Env$name)
+
+
+
+
+
+
+write.fasta(sequences = as.list(Env$sequence),
+            names = as.list(Env$name), paste(x, "nochimEnv.fasta", sep = ""))
+
+#as.list(QB045Env$sequence)
+#as.list(QB045Env$name)
+}
+
+```
+
