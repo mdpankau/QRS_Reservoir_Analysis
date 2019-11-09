@@ -1,31 +1,9 @@
----
-title: "041219_Fastq_Filtering_Loop_Sample_nochim_Env"
-author: "Mark Pankau"
-date: "April 12, 2019"
-output: html_document
----
 
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
-```
+
 
 ```{r, include = FALSE}
-##Problems- The code doesn't pick ties in PWD well-
-##it will not choose the earliest day for RNA
-##i should change the names of the RNA to the DPI
-##biggest problem is with TShoot
-#setwd("/Volumes/homes/NGS_Analysis/QRS_Reservoir_Paper_Illumina_Only_2019")
-#source("https://bioconductor.org/biocLite.R")
-#biocLite("dada2")
-#biocLite("seqinr")
-#biocLite("ape")
-#biocLite("ggtree")
-#biocLite("phangorn")
-#biocLite("stringr")
-#biocLite("msa")
-#biocLite("cowplot")
-#biocLite("gridExtra")
+
 library(dada2)
 library(Rcpp)
 library(data.table)
@@ -44,14 +22,6 @@ library(ggtree)
 library(treeio)
 library(plyr)
 ###
-###
-###
-###
-###
-######Things I might want to add in- Color to match the type of initial or superinfection
-#symbol to match patient?,
-#normalize number of dots to represent sequence proportion.
-#pdf("/Volumes/homes/NGS_Analysis/RCODE_Test/PairwisePlots041818.pdf")
 
 ```
 
@@ -149,8 +119,6 @@ track <- cbind(out, sapply(dadaFs, getN), sapply(mergers, getN), rowSums(seqtab)
 colnames(track) <- c("input", "filtered", "denoised", "merged", "tabled", "nonchim")
 #rownames(track) <- sample.names
 track
-write.csv(track, file = paste(x, "nochim_Env_Filter_Numbers.csv", sep = "_")) 
-
 final_df <- as.data.frame(t(seqtab))
 
 #final_df$seqs = names(final_df)
@@ -269,8 +237,6 @@ Env$name <- as.character(Env$name)
 write.fasta(sequences = as.list(Env$sequence),
             names = as.list(Env$name), paste(x, "nochimEnv.fasta", sep = ""))
 
-#as.list(QB045Env$sequence)
-#as.list(QB045Env$name)
 }
 
 ```
