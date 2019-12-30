@@ -1,13 +1,4 @@
----
-title: "043019_Loop_FINAL_FASTA"
-author: "Mark Pankau"
-date: "April 30, 2019"
-output: html_document
----
-
-
-
-
+##This code is for generating trees from the FASTA files
 
 ```{r}
 setwd("~/NGS_Analysis/QRS_Reservoir_Paper_Illumina_Only_2019/050519 FINAL_FASTA_by SI")
@@ -24,14 +15,8 @@ for(patient in QRSID){
   fasta <- readDNAStringSet(paste(patient,"Env_Final.fasta", sep = "_"))
   msa <- msa(fasta)
   summary(msa)
-  #msaConvert(msa,type = "phangorn::phyDat")
-  #fasta_msa <- msaConvert(msa, type = "bio3d::fasta")
-  #ape_msa <- msaConvert(msa, type = "ape::DNAbin")
 phangorn_msa <- as.phyDat(msa, type = "DNA")
-  #summary(phangorn_msa)
-  #summary(ape_msa)
- 
-    
+
       Sequencenames <- names(phangorn_msa)
 df <- as.data.frame(str_split_fixed(Sequencenames, "_", 7))
 df <- cbind(Sequencenames,df)
@@ -48,9 +33,9 @@ df$Years_Post_Infection = as.numeric(as.character(df$Years_Post_Infection))
 df$Read_Count = as.numeric(as.character(df$Read_Count))
 df$Nucleic_Acid <- as.character(df$Nucleic_Acid)
 
-n_occur <- data.frame(table(Sequencenames))
-n_occur[n_occur$Freq > 1,]
-##need to find min AIC for model test and use that model in computing pairwise distance.  
+#n_occur <- data.frame(table(Sequencenames))
+#n_occur[n_occur$Freq > 1,]
+
 model <- modelTest(phangorn_msa, model = "all")
 minmodel <- model$Model[which.min(model$AIC)]
 minmodel
@@ -78,27 +63,12 @@ plot(treeBS)
 
 p = ggtree(treeBS, layout = 'rectangular')
 
-
-pdf(file = paste(patient, "delete_Chimera_Env", "Tree", ".pdf", sep = "_"))
-
 q <- p %<+% df + geom_tippoint(aes(shape = Nucleic_Acid,
                                color = IIorSI),
                            size = 3) +
   theme(legend.position = "left") +
   ggtitle(paste(df$Patient, df$Region, sep = "_")) 
 
-#+  scale_color_gradientn(breaks = unique(df$Years_Post_Infection),
-#                     labels = unique(df$Years_Post_Infection),
-#                     colors = c("#e6194B", "#f58231", "#ffe119", 
-#                                 "#bfef45", "#3cb44b", "#42d4f4",
-#                                "#4363d8", "#911eb4", "#f032e6")) 
-  print(q)
-  dev.off()
-
-
-
-
- 
   Treed  = as.phylo(q)
 df$Read_Count = as.numeric(df$Read_Count)
 df1 <- ddply(df,.(df$Patient,df$Years_Post_Infection),
@@ -142,9 +112,6 @@ prop = assign(paste(patient, "df4", sep = "_"), na.omit(df3 %>%
    summarize(Proportion_Each = sum(Proportion))))
 
 
-#issue - i don't get the 0 values when a variant isn't seen
-#can i create a new row with zeros based off the proportion sum at each time point?
-#for each timepoint i need II SI and Recombinant values, if no value supplied create a row with 0
 prop$IIorSI <- as.character(prop$IIorSI)
 prop$IIorSI <- ifelse(prop$IIorSI %in% c("Super"), "Superinfection", prop$IIorSI)
 prop1 = assign(paste(patient, "df4", sep = "_"), na.omit(df3 %>%
@@ -177,11 +144,7 @@ prop1 <- merge(prop1, propall, by = c("Years_Post_Infection",
 
 prop1$Proportion_Each <- ifelse(prop1$Proportion_Each %in% c(NA), 0, prop1$Proportion_Each)
 
-
-
-
 prop1$IIorSI <- as.character(prop1$IIorSI)
-##dashed line at the largest RNA (time)
 prop <- prop1
 pdf(file = paste(patient, "delete_Chimera_Env", "Proportion", ".pdf", sep = "_"))
 class(prop$IIorSI)
@@ -218,7 +181,6 @@ H <-  ggplot()  +
  print(H)
 assign(paste(patient, "proportion_Env_plot", sep = "_"), H)
 
-dev.off()
  pairwise_distance <- cophenetic.phylo(treeBS)
 pairwise_distance <- as.data.frame(pairwise_distance)
 
@@ -229,32 +191,9 @@ DNA_pairwise <- pairwise_distance[,grep("DNA",names(pairwise_distance)),]
 #Return only RNA values in the row names
 DNA_pairwise <- DNA_pairwise[grep("DNA",names(pairwise_distance), invert = TRUE),]
 
-
-
-
-##At this point I have a matrix with DNA sequence names as the columns-
-##RNA sequence names as the rows
-## I want to match the DNA to the RNA that has the smallest pairwise distance-
-## and the smallest days post infection.  Right now, the code matches-
-##smallest pairwise distance and alphabetical order of sequence names.
-## I can't rename all the sequences by their DPI because they need unique names-
-## DPI + sequence counts may get me there, However, the way numbers as strings-
-## are processed may be a problem as it will put 11 as earlier than 2.  I can -
-##make a key where the days are letters of the alphabet, and convert those-
-##letters back to numbers after matching smallest PWD. BUT the rownames can't
-## be identical. So I will have to make each time point a letter followed by
-## a sequential number.
-
-
-
 assign(paste(patient, "distance_matrix", sep = ""), DNA_pairwise)
 
-
-
 DNA_pairwise1 = as.data.frame(colnames(DNA_pairwise))
-
-
-
 
 DNA_pairwise1 <- cbind(DNA_pairwise1,rownames(DNA_pairwise[apply(DNA_pairwise, 2, which.min), ]))
 names(DNA_pairwise1) <- c("Sequencenames", "Closest RNA")
@@ -262,10 +201,6 @@ x <- str_split_fixed(DNA_pairwise1$`Closest RNA`, "_", 7)
 DNA_pairwise1$Timepoint <- x[,4]
 DNA_pairwise1$Timepoint <- as.numeric(DNA_pairwise1$Timepoint)
   
-
-
-
-
 
 DNAEnv <- DNA_pairwise1
 #DNAEnv$Nucleic_Acid <- "Env"
@@ -282,11 +217,6 @@ Env  <- ggplot()  +
 Env
 
 
-#combine df11 (proportions) with DNA2 (closest RNA) only want the DNA
-#df11 is df1 now
-
-#dfDNA <- na.omit(df[df$Years_Post_Infection == paste (max(df$Years_Post_Infection, na.rm = TRUE)),])
-
 Timepointprop <- merge(DNAEnv, df1, by = c("Sequencenames"))
 
   
@@ -294,7 +224,7 @@ Timepointprop <- merge(DNAEnv, df1, by = c("Sequencenames"))
 Timepointprop$YearstoART <- max(df$Years_Post_Infection[df$Nucleic_Acid == "RNA"])
 
 Timepointprop$Years_Prior_to_ART <- Timepointprop$YearstoART - Timepointprop$Timepoint
-#####################################################################################################################################################################################################################################################################################################################
+
 class(Timepointprop$Proportion)
 
 Timeisaflatcircle <- as.data.frame(ddply(Timepointprop, ~Years_Prior_to_ART + Patient ,summarise, count=sum(Proportion)))
@@ -328,7 +258,7 @@ dev.off()
  
 ```
 
-
+##Gag Processing
 ```{r}
 setwd("~/NGS_Analysis/QRS_Reservoir_Paper_Illumina_Only_2019/050519 FINAL_FASTA_by SI")
 path <- "~/NGS_Analysis/QRS_Reservoir_Paper_Illumina_Only_2019/050519 FINAL_FASTA_by SI" 
@@ -407,11 +337,7 @@ q <- p %<+% df + geom_tippoint(aes(shape = Nucleic_Acid,
   theme(legend.position = "left") +
   ggtitle(paste(df$Patient, df$Region, sep = "_")) 
 
-#+  scale_color_gradientn(breaks = unique(df$Years_Post_Infection),
-#                     labels = unique(df$Years_Post_Infection),
-#                     colors = c("#e6194B", "#f58231", "#ffe119", 
-#                                 "#bfef45", "#3cb44b", "#42d4f4",
-#                                "#4363d8", "#911eb4", "#f032e6")) 
+
   print(q)
   dev.off()
 
@@ -551,19 +477,6 @@ DNA_pairwise <- DNA_pairwise[grep("DNA",names(pairwise_distance), invert = TRUE)
 
 
 
-
-##At this point I have a matrix with DNA sequence names as the columns-
-##RNA sequence names as the rows
-## I want to match the DNA to the RNA that has the smallest pairwise distance-
-## and the smallest days post infection.  Right now, the code matches-
-##smallest pairwise distance and alphabetical order of sequence names.
-## I can't rename all the sequences by their DPI because they need unique names-
-## DPI + sequence counts may get me there, However, the way numbers as strings-
-## are processed may be a problem as it will put 11 as earlier than 2.  I can -
-##make a key where the days are letters of the alphabet, and convert those-
-##letters back to numbers after matching smallest PWD. BUT the rownames can't
-## be identical. So I will have to make each time point a letter followed by
-## a sequential number.
 
 
 
